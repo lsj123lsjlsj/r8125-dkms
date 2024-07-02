@@ -46,6 +46,7 @@
 #include <linux/if_vlan.h>
 #include <linux/crc32.h>
 #include <linux/interrupt.h>
+#include <linux/of.h>
 #include <linux/in.h>
 #include <linux/ip.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,22)
@@ -11479,6 +11480,59 @@ rtl8125_setup_mqs_reg(struct rtl8125_private *tp)
         }
 }
 
+/*
+ * Refer to RTL8125 datasheet 5.Customizable LED Configuration
+ * Register Name	IO Address
+ * LEDSEL0		0x18
+ * LEDSEL1		0x86
+ * LEDSEL2		0x84
+ * LEDSEL3		0x96
+ * LEDFEATURE		0x94
+ *
+ * LEDSEL Bit[]		Description
+ * Bit0			Link10M
+ * Bit1			Link100M
+ * Bit3			Link1000M
+ * Bit5			Link2.5G
+ * Bit9			ACT
+ * Bit10		preboot enable
+ * Bit11		lp enable
+ * Bit12		active low/high
+ *
+ * LEDFEATURE		Description
+ * Bit0			LED Table V1/V2
+ * Bit1~3		Reserved
+ * Bit4~5		LED Blinking Duty Cycle	12.5%/ 25%/ 50%/ 75%
+ * Bit6~7		LED Blinking Freq. 240ms/160ms/80ms/Link-Speed-Dependent
+ */
+static int
+rtl8125_led_configuration(struct rtl8125_private *tp)
+{
+        const int led_regs[] = { LEDSEL0, LEDSEL1, LEDSEL2, LEDSEL3 }; /* LEDSEL 0-3 */
+        u32 led_data[4];
+        u8 led_feature;
+        int ret, i;
+
+        ret = of_property_read_u32_array(tp->pci_dev->dev.of_node,
+                                  "realtek,led-data", led_data, 4);
+
+        if (!ret) {
+                for (i = 0; i < 4; i++)
+                {
+                        RTL_W16(tp, led_regs[i], led_data[i]);
+                        msleep(1);
+                }
+        }
+
+        ret = of_property_read_u8(tp->pci_dev->dev.of_node,
+                                  "realtek,led-feature", &led_feature);
+
+        if (!ret) {
+                RTL_W8(tp, LEDFEATURE, led_feature);
+        }
+        return 0;
+}
+
 static void
 rtl8125_init_software_variable(struct net_device *dev)
 {
@@ -11958,6 +12012,8 @@ rtl8125_init_software_variable(struct net_device *dev)
                 tp->rtl8125_rx_config |= EnableRxDescV3;
 
         tp->NicCustLedValue = RTL_R16(tp, CustomLED);
+
+        rtl8125_led_configuration(tp);
 
         tp->wol_opts = rtl8125_get_hw_wol(tp);
         tp->wol_enabled = (tp->wol_opts) ? WOL_ENABLED : WOL_DISABLED;
